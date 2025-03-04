@@ -1,32 +1,25 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status
-set -e  
+set -e
 
-# Ensure the correct Python version is used
-PYTHON_VERSION="3.10"
+# Ensure Python is available
+PYTHON_CMD=$(which python3.10 || which python3 || which python)
 
-# Check if the correct Python version is installed
-if ! python3 --version | grep -q "$PYTHON_VERSION"; then
-    echo "Error: Python $PYTHON_VERSION is required. Update the environment settings."
+if ! $PYTHON_CMD --version | grep -q "3.10"; then
+    echo "Error: Python 3.10.x is required but not found."
     exit 1
 fi
 
-# Create and activate a virtual environment if it doesn't exist
+# Setup Python virtual environment
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    $PYTHON_CMD -m venv venv
 fi
 
 source venv/bin/activate
 
-# Upgrade pip before installing dependencies
+# Upgrade pip and install dependencies
 pip install --upgrade pip
+pip install -r requirements.txt || { echo "Error: Failed to install dependencies"; exit 1; }
 
-# Install Python dependencies
-pip install -r requirements.txt || { echo "Error: Failed to install Python dependencies"; exit 1; }
-
-# Start the Node.js server in the background
-node server.js &
-
-# Start the Python server (use exec to properly forward signals)
-exec python3 opencv.py
+# Use npm to start both Node.js and Python together
+exec npm start

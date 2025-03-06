@@ -28,7 +28,7 @@ except Exception as e:
     exit(1)
 
 # Node.js Backend URL
-NODEJS_BACKEND_URL = os.getenv("NODEJS_BACKEND_URL", "https://ce09-102-215-33-50.ngrok-free.app")
+NODEJS_BACKEND_URL = os.getenv("NODEJS_BACKEND_URL", "https://expresspap.onrender.com")
 
 # Image Processing Endpoint
 @app.route("/upload", methods=["POST"])

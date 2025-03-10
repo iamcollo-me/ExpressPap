@@ -100,7 +100,7 @@ const handleVerify = async () => {
       const lprResponse = await fetch(`${LPR_API_URL}/upload`, {
         method: 'POST',
         body: formData,
-        signal: AbortSignal.timeout(60000), // Increase timeout to 60 seconds
+        signal: AbortSignal.timeout(40000), 
       });
       console.timeEnd("OCR Process");
 

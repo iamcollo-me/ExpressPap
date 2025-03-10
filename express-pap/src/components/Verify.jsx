@@ -11,8 +11,13 @@ const Verify = () => {
   const [errors, setErrors] = useState({});
   const [pollCount, setPollCount] = useState(0);
 
+  // Access environment variables
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL; // Node.js backend
   const LPR_API_URL = import.meta.env.VITE_LPR_API_URL;   // Python backend
+
+  // Debugging: Log environment variables
+  console.log("API_BASE_URL:", API_BASE_URL);
+  console.log("LPR_API_URL:", LPR_API_URL);
 
   // Poll transaction status
   useEffect(() => {
@@ -79,83 +84,81 @@ const Verify = () => {
   };
 
   // Handle verification process
-const handleVerify = async () => {
-  if (!validateFields()) return;
+  const handleVerify = async () => {
+    if (!validateFields()) return;
 
-  setLoading(true);
-  setMessage('Processing your request. This may take a moment...');
-  setVehicle(null);
-  setTransactionStatus('pending');
-  setTransactionId(null);
+    setLoading(true);
+    setMessage('Processing your request. This may take a moment...');
+    setVehicle(null);
+    setTransactionStatus('pending');
+    setTransactionId(null);
 
-  try {
-    let extractedLicensePlate = licensePlate;
+    try {
+      let extractedLicensePlate = licensePlate;
 
-    // If an image is uploaded, send it to the Python backend for OCR
-    if (image) {
-      const formData = new FormData();
-      formData.append('image', image);
+      // If an image is uploaded, send it to the Python backend for OCR
+      if (image) {
+        const formData = new FormData();
+        formData.append('image', image);
 
-      console.time("OCR Process");
-      const lprResponse = await fetch(`${LPR_API_URL}/upload`, {
+        console.time("OCR Process");
+        const lprResponse = await fetch(`${LPR_API_URL}/upload`, {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(40000), 
+        });
+        console.timeEnd("OCR Process");
+
+        if (!lprResponse.ok) {
+          throw new Error(`Python backend error: ${lprResponse.statusText}`);
+        }
+
+        const lprData = await lprResponse.json();
+        console.log("Python backend response:", lprData);
+
+        if (!lprData.licensePlate) {
+          throw new Error("Failed to extract license plate from image.");
+        }
+
+        extractedLicensePlate = lprData.licensePlate;
+      }
+
+      // Send the license plate to the Node.js backend for payment initiation
+      console.time("Payment Verification");
+      const verifyResponse = await fetch(`${API_BASE_URL}/verify`, {
         method: 'POST',
-        body: formData,
-        signal: AbortSignal.timeout(40000), 
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          licensePlate: extractedLicensePlate,
+        }),
       });
-      console.timeEnd("OCR Process");
+      console.timeEnd("Payment Verification");
 
-      if (!lprResponse.ok) {
-        throw new Error(`Python backend error: ${lprResponse.statusText}`);
+      if (!verifyResponse.ok) {
+        throw new Error(`Node.js backend error: ${verifyResponse.statusText}`);
       }
 
-      const lprData = await lprResponse.json();
-      console.log("Python backend response:", lprData);
+      const verifyData = await verifyResponse.json();
+      console.log("Node.js backend response:", verifyData);
 
-      if (!lprData.licensePlate) {
-        throw new Error("Failed to extract license plate from image.");
+      if (verifyData.registered) {
+        setVehicle(verifyData.vehicle);
+        setTransactionId(verifyData.transactionId);
+        setMessage("Please check your phone to complete the M-Pesa payment.");
+      } else {
+        setTransactionStatus(null);
+        setMessage(verifyData.message || "Vehicle not found. Please register.");
       }
-
-      extractedLicensePlate = lprData.licensePlate;
+    } catch (error) {
+      console.error("Verify error:", error);
+      setTransactionStatus('error');
+      setMessage(error.message || "Error verifying vehicle. Please try again.");
     }
 
-    // Send the license plate to the Node.js backend for payment initiation
-    console.time("Payment Verification");
-    const verifyResponse = await fetch(`${API_BASE_URL}/verify`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        licensePlate: extractedLicensePlate,
-      }),
-    });
-    console.timeEnd("Payment Verification");
-
-    if (!verifyResponse.ok) {
-      throw new Error(`Node.js backend error: ${verifyResponse.statusText}`);
-    }
-
-    const verifyData = await verifyResponse.json();
-    console.log("Node.js backend response:", verifyData);
-
-    if (verifyData.registered) {
-      setVehicle(verifyData.vehicle);
-      setTransactionId(verifyData.transactionId);
-      setMessage("Please check your phone to complete the M-Pesa payment.");
-    } else {
-      setTransactionStatus(null);
-      setMessage(verifyData.message || "Vehicle not found. Please register.");
-    }
-  } catch (error) {
-    console.error("Verify error:", error);
-    setTransactionStatus('error');
-    setMessage(error.message || "Error verifying vehicle. Please try again.");
-  }
-
-  setLoading(false);
-};
-
-
+    setLoading(false);
+  };
 
   return (
     <div className="container mx-auto my-4 p-4 bg-dark-100 rounded-lg shadow-lg">

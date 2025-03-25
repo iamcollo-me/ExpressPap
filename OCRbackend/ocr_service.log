@@ -1,0 +1,19 @@
+2025-03-26 00:17:08,140 - WARNING - Using CPU. Note: This module is much faster with a GPU.
+2025-03-26 00:17:08,145 - WARNING - Downloading detection model, please wait. This may take several minutes depending upon your network connection.
+2025-03-26 00:18:51,786 - INFO - Download complete
+2025-03-26 00:18:51,786 - WARNING - Downloading recognition model, please wait. This may take several minutes depending upon your network connection.
+2025-03-26 00:19:08,827 - INFO - Download complete.
+2025-03-26 00:19:33,681 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.0.102:5001
+2025-03-26 00:19:33,734 - INFO - [33mPress CTRL+C to quit[0m
+2025-03-26 00:20:03,098 - INFO - 127.0.0.1 - - [26/Mar/2025 00:20:03] "[31m[1mPOST /upload HTTP/1.1[0m" 400 -
+2025-03-26 00:21:23,337 - INFO - 127.0.0.1 - - [26/Mar/2025 00:21:23] "[31m[1mPOST /upload HTTP/1.1[0m" 400 -
+2025-03-26 00:24:56,519 - WARNING - Using CPU. Note: This module is much faster with a GPU.
+2025-03-26 00:25:00,321 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5001
+ * Running on http://192.168.0.102:5001
+2025-03-26 00:25:00,322 - INFO - [33mPress CTRL+C to quit[0m
+2025-03-26 00:25:08,696 - INFO - 127.0.0.1 - - [26/Mar/2025 00:25:08] "[31m[1mPOST /upload HTTP/1.1[0m" 400 -

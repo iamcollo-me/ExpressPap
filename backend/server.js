@@ -193,37 +193,40 @@ app.post('/register', async (req, res) => {
 });
 
 // Verify and Payment Endpoint
-
- app.post('/verify', async (req, res) => {
+app.post('/verify', async (req, res) => {
   try {
-    // 1. Validate and clean input
-    if (!req.body.licensePlate || typeof req.body.licensePlate !== 'string') {
-      return res.status(400).json({ error: "Valid license plate required" });
-    }
+    const licensePlate = req.body.licensePlate?.toUpperCase().replace(/\s/g, '');
 
-    // 2. Standardize format (uppercase, no spaces, no special chars)
-    const licensePlate = req.body.licensePlate
-      .toUpperCase()
-      .replace(/\s/g, '')
-      .replace(/[^A-Z0-9]/g, '');
-
-    // 3. Simple validation
-    if (licensePlate.length < 3 || licensePlate.length > 12) {
-      return res.status(400).json({ error: "Invalid license plate length" });
-    }
-
-    // 4. Direct database query (no regex)
-    const vehicle = await Vehicle.findOne({ licensePlate }).lean();
-
-    if (!vehicle) {
-      return res.status(404).json({ 
+    if (!licensePlate) {
+      return res.status(400).json({
         registered: false,
-        searchedPlate: licensePlate 
+        message: "Invalid license plate format"
       });
     }
 
-    // 5. Proceed with payment
+    const vehicle = await Vehicle.findOne({
+      licensePlate: { $regex: new RegExp(`^${licensePlate}$`, 'i') }
+    }).lean();
+
+    if (!vehicle) {
+      console.log(`🚫 Unregistered vehicle attempt: ${licensePlate}`);
+      return res.status(404).json({
+        registered: false,
+        message: "Vehicle not registered",
+        suggestedPlate: licensePlate
+      });
+    }
+
+    // Ensure the contact field exists and is valid
+    if (!vehicle.contact) {
+      return res.status(400).json({
+        registered: false,
+        message: "Vehicle contact information is missing"
+      });
+    }
+
     const paymentResponse = await initiateMpesaPayment(vehicle.contact);
+
     const transaction = await Transaction.create({
       licensePlate: vehicle.licensePlate,
       phoneNumber: vehicle.contact,
@@ -233,17 +236,20 @@ app.post('/register', async (req, res) => {
       merchantRequestID: paymentResponse.MerchantRequestID,
     });
 
-    return res.json({
+    console.log(`💳 Payment initiated for ${vehicle.licensePlate}`);
+
+    res.status(200).json({
       registered: true,
+      message: "Payment initiated",
       vehicle,
       transactionId: transaction._id
     });
 
   } catch (error) {
-    console.error('Verify error:', error);
-    return res.status(500).json({ 
-      error: "Processing error",
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    console.error('🔥 Verify endpoint error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.response?.data?.error || error.message
     });
   }
 });

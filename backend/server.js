@@ -9,89 +9,118 @@ dotenv.config();
 
 const app = express();
 
-// Middleware Configuration
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Enhanced Middleware Configuration
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// MongoDB Connection
+// MongoDB Connection with Retry Logic
 const connectToDatabase = async () => {
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-      family: 4 // Force IPv4
-    });
-    console.log("✅ MongoDB connection established");
-  } catch (error) {
-    console.error("🔴 Critical MongoDB connection failure:", error);
-    process.exit(1);
+  const maxRetries = 3;
+  let retryCount = 0;
+
+  while (retryCount < maxRetries) {
+    try {
+      await mongoose.connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 30000,
+        family: 4
+      });
+      console.log("✅ MongoDB connection established");
+      return;
+    } catch (error) {
+      retryCount++;
+      console.error(`🔴 MongoDB connection attempt ${retryCount} failed:`, error);
+      if (retryCount === maxRetries) {
+        console.error("🔴 Critical MongoDB connection failure");
+        process.exit(1);
+      }
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
   }
 };
 
-// Database Models
+// Enhanced Schemas with Validation
 const vehicleSchema = new mongoose.Schema({
   licensePlate: {
     type: String,
     required: true,
     unique: true,
     uppercase: true,
+    trim: true,
+    validate: {
+      validator: function(v) {
+        return /^[A-Z0-9]{3,12}$/.test(v);
+      },
+      message: props => `${props.value} is not a valid license plate!`
+    }
+  },
+  ownerName: {
+    type: String,
+    required: true,
     trim: true
   },
-  ownerName: String,
+  contact: {
+    type: String,
+    required: true,
+    validate: {
+      validator: function(v) {
+        return /^(0|\+254|254)\d{9}$/.test(v);
+      },
+      message: props => `${props.value} is not a valid phone number!`
+    }
+  },
   carType: String,
   brand: String,
   color: String,
   registrationDate: {
     type: Date,
-    default: Date.now,
-  },
-  contact: String,
-});
+    default: Date.now
+  }
+}, { timestamps: true });
 
 const Vehicle = mongoose.model('Vehicle', vehicleSchema);
 
 const transactionSchema = new mongoose.Schema({
   licensePlate: {
     type: String,
-    required: true,
+    required: true
   },
   phoneNumber: {
     type: String,
-    required: true,
+    required: true
   },
   amount: {
     type: Number,
     required: true,
     default: 1,
+    min: 1
   },
   status: {
     type: String,
-    enum: ['pending', 'success', 'failed'],
-    default: 'pending',
+    enum: ['pending', 'success', 'failed', 'timeout'],
+    default: 'pending'
   },
   mpesaReceiptNumber: String,
   checkoutRequestID: String,
   merchantRequestID: String,
   transactionDate: {
     type: Date,
-    default: Date.now,
-  },
-}, {
-  timestamps: true,
-});
+    default: Date.now
+  }
+}, { timestamps: true });
 
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
-// M-Pesa Token Handling
+// M-Pesa Token Management
 let mpesaAccessToken = null;
 let tokenExpiryTime = null;
 
-async function getMpesaAccessToken() {
+const getMpesaAccessToken = async () => {
   try {
     const consumerKey = process.env.MPESA_CONSUMER_KEY;
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
@@ -99,44 +128,45 @@ async function getMpesaAccessToken() {
 
     const response = await axios.get('https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials', {
       headers: { Authorization: `Basic ${auth}` },
+      timeout: 10000
     });
 
     mpesaAccessToken = response.data.access_token;
-    tokenExpiryTime = Date.now() + 55 * 60 * 1000;
-    console.log("🔑 M-Pesa access token refreshed");
+    tokenExpiryTime = Date.now() + (response.data.expires_in * 1000);
+    console.log("🔑 M-Pesa token refreshed");
   } catch (error) {
-    console.error("🔴 Error fetching access token:", error.message);
-    throw error;
+    console.error("🔴 M-Pesa token error:", error.message);
+    throw new Error("Failed to get M-Pesa access token");
   }
-}
+};
 
-// M-Pesa Payment Initiation
-async function initiateMpesaPayment(phone, amount = 1) {
+// Phone Number Formatter
+const formatPhoneNumber = (phone) => {
+  const phoneString = phone.toString().trim().replace(/\D/g, '');
+
+  if (phoneString.startsWith('0') && phoneString.length === 10) {
+    return `254${phoneString.substring(1)}`;
+  } else if (phoneString.startsWith('254') && phoneString.length === 12) {
+    return phoneString;
+  } else if (phoneString.startsWith('7') && phoneString.length === 9) {
+    return `254${phoneString}`;
+  } else if (phoneString.startsWith('+254') && phoneString.length === 13) {
+    return phoneString.substring(1);
+  } else {
+    throw new Error(`Invalid phone number format: ${phone}`);
+  }
+};
+
+// Enhanced M-Pesa Payment Initiator
+const initiateMpesaPayment = async (phone, amount = 1) => {
   try {
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[-T:]/g, '');
+    if (!mpesaAccessToken || Date.now() >= tokenExpiryTime) {
+      await getMpesaAccessToken();
+    }
+
+    const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
     const password = Buffer.from(`${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
-
-    // Convert phone number to 254 format
-    const phoneString = phone.toString().trim();
-    let formattedPhone;
-
-    if (phoneString.startsWith("0")) {
-      formattedPhone = `254${phoneString.slice(1)}`; // Convert 07... to 2547...
-    } else if (phoneString.startsWith("+254")) {
-      formattedPhone = phoneString.slice(1); // Remove the + from +254...
-    } else if (phoneString.startsWith("254")) {
-      formattedPhone = phoneString; // Already in 254 format
-    } else if (phoneString.match(/^\d{9}$/)) {
-      // Handle numbers like 790802553 (missing leading 0)
-      formattedPhone = `254${phoneString}`; // Assume it's a local number missing the 0
-    } else {
-      throw new Error(`Invalid phone number format: ${phoneString}. Must start with 0, +254, or 254, or be 9 digits.`);
-    }
-
-    // Validate the formatted phone number
-    if (formattedPhone.length !== 12 || !formattedPhone.match(/^254\d{9}$/)) {
-      throw new Error(`Invalid phone number: ${formattedPhone}. Must be 12 digits starting with 254.`);
-    }
+    const formattedPhone = formatPhoneNumber(phone);
 
     const response = await axios.post(
       'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
@@ -149,197 +179,238 @@ async function initiateMpesaPayment(phone, amount = 1) {
         PartyA: formattedPhone,
         PartyB: process.env.MPESA_SHORTCODE,
         PhoneNumber: formattedPhone,
-        CallBackURL: process.env.MPESA_CALLBACK_URL,
-        AccountReference: 'TollPayment',
-        TransactionDesc: 'Toll Fee Payment',
+        CallBackURL: `${process.env.API_BASE_URL}/mpesa/callback`,
+        AccountReference: 'TOLL-PAYMENT',
+        TransactionDesc: 'Toll Payment'
       },
       {
-        headers: { Authorization: `Bearer ${mpesaAccessToken}` },
+        headers: {
+          'Authorization': `Bearer ${mpesaAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
       }
     );
 
-    return response.data;
+    if (response.data.ResponseCode !== "0") {
+      throw new Error(response.data.ResponseDescription || 'M-Pesa request failed');
+    }
+
+    return {
+      CheckoutRequestID: response.data.CheckoutRequestID,
+      MerchantRequestID: response.data.MerchantRequestID,
+      ResponseCode: response.data.ResponseCode,
+      ResponseDescription: response.data.ResponseDescription
+    };
   } catch (error) {
-    console.error("🔴 M-Pesa payment initiation error:", error.response?.data || error.message);
+    console.error("🔴 M-Pesa payment error:", error.response?.data || error.message);
     throw error;
   }
-}
+};
 
-
-
-
-// Schedule token refresh
+// Token Refresh Scheduler
 setInterval(async () => {
-  if (!mpesaAccessToken || Date.now() >= tokenExpiryTime) {
-    await getMpesaAccessToken();
+  try {
+    if (!mpesaAccessToken || Date.now() >= tokenExpiryTime - 300000) { // Refresh 5 minutes before expiry
+      await getMpesaAccessToken();
+    }
+  } catch (error) {
+    console.error("🔴 Token refresh error:", error.message);
   }
-}, 55 * 60 * 1000);
+}, 300000); // Check every 5 minutes
 
-// Initial token fetch
-getMpesaAccessToken();
+// Initialize M-Pesa Token
+getMpesaAccessToken().catch(err => {
+  console.error("🔴 Initial token fetch failed:", err.message);
+});
 
-// Routes
-app.get('/', (req, res) => res.send("API is running..."));
+// Enhanced Routes
+app.get('/', (req, res) => {
+  res.json({
+    status: 'active',
+    version: '1.0.0',
+    services: ['mpesa', 'ocr', 'database']
+  });
+});
 
-// Vehicle Registration Endpoint
+// Vehicle Registration Endpoint with Phone Validation
 app.post('/register', async (req, res) => {
   try {
-    const vehicle = new Vehicle(req.body);
+    const { contact, ...rest } = req.body;
+    
+    // Format phone number before saving
+    const formattedContact = formatPhoneNumber(contact);
+    
+    const vehicle = new Vehicle({
+      ...rest,
+      contact: formattedContact
+    });
+
     await vehicle.save();
-    res.status(201).send({ message: "✔️ Successful Registration" });
+    
+    res.status(201).json({
+      success: true,
+      message: "Vehicle registered successfully",
+      data: {
+        licensePlate: vehicle.licensePlate,
+        contact: vehicle.contact
+      }
+    });
   } catch (error) {
-    res.status(500).send({ message: "❌ Error registering vehicle!", error });
+    console.error("🔴 Registration error:", error.message);
+    res.status(400).json({
+      success: false,
+      message: error.message.includes('validation') 
+        ? error.message 
+        : 'Registration failed. Please check your data.'
+    });
   }
 });
 
 // Verify and Payment Endpoint
 app.post('/verify', async (req, res) => {
   try {
-    const licensePlate = req.body.licensePlate?.toUpperCase().replace(/\s/g, '');
-
+    const { licensePlate } = req.body;
+    
     if (!licensePlate) {
       return res.status(400).json({
-        registered: false,
-        message: "Invalid license plate format"
+        success: false,
+        message: "License plate is required"
       });
     }
 
+    // Case-insensitive search with sanitization
+    const cleanPlate = licensePlate.toUpperCase().replace(/\s/g, '');
     const vehicle = await Vehicle.findOne({
-      licensePlate: { $regex: new RegExp(`^${licensePlate}$`, 'i') }
-    }).lean();
+      licensePlate: { $regex: new RegExp(`^${cleanPlate}$`, 'i') }
+    });
 
     if (!vehicle) {
-      console.log(`🚫 Unregistered vehicle attempt: ${licensePlate}`);
       return res.status(404).json({
-        registered: false,
+        success: false,
         message: "Vehicle not registered",
-        suggestedPlate: licensePlate
+        data: { licensePlate: cleanPlate }
       });
     }
 
-    // Ensure the contact field exists and is valid
-    if (!vehicle.contact) {
-      return res.status(400).json({
-        registered: false,
-        message: "Vehicle contact information is missing"
-      });
-    }
-
-    const paymentResponse = await initiateMpesaPayment(vehicle.contact);
-
+    // Initiate payment
+    const payment = await initiateMpesaPayment(vehicle.contact);
+    
+    // Save transaction
     const transaction = await Transaction.create({
       licensePlate: vehicle.licensePlate,
       phoneNumber: vehicle.contact,
       amount: 1,
       status: 'pending',
-      checkoutRequestID: paymentResponse.CheckoutRequestID,
-      merchantRequestID: paymentResponse.MerchantRequestID,
+      checkoutRequestID: payment.CheckoutRequestID,
+      merchantRequestID: payment.MerchantRequestID
     });
-
-    console.log(`💳 Payment initiated for ${vehicle.licensePlate}`);
 
     res.status(200).json({
-      registered: true,
-      message: "Payment initiated",
-      vehicle,
-      transactionId: transaction._id
+      success: true,
+      message: "Payment initiated successfully",
+      data: {
+        vehicle: {
+          licensePlate: vehicle.licensePlate,
+          owner: vehicle.ownerName,
+          contact: vehicle.contact
+        },
+        transaction: {
+          id: transaction._id,
+          status: transaction.status,
+          timestamp: transaction.createdAt
+        }
+      }
     });
-
   } catch (error) {
-    console.error('🔥 Verify endpoint error:', error);
+    console.error("🔴 Verification error:", error.message);
     res.status(500).json({
-      status: 'error',
-      message: error.response?.data?.error || error.message
+      success: false,
+      message: error.message.includes('phone number')
+        ? "Invalid contact number format"
+        : "Payment initiation failed"
     });
   }
 });
 
-// M-Pesa Callback Endpoint
+// M-Pesa Callback Handler
 app.post('/mpesa/callback', async (req, res) => {
   try {
-    const { Body } = req.body;
-    const { stkCallback } = Body;
+    const callback = req.body;
+    console.log("📞 M-Pesa callback received:", JSON.stringify(callback, null, 2));
 
-    const transaction = await Transaction.findOne({
-      checkoutRequestID: stkCallback.CheckoutRequestID,
-      status: 'pending',
-    }).sort({ createdAt: -1 });
+    if (!callback.Body.stkCallback) {
+      return res.status(400).json({ success: false, message: "Invalid callback format" });
+    }
+
+    const { CheckoutRequestID, ResultCode, CallbackMetadata } = callback.Body.stkCallback;
+    
+    const transaction = await Transaction.findOneAndUpdate(
+      { checkoutRequestID: CheckoutRequestID },
+      {
+        status: ResultCode === 0 ? 'success' : 'failed',
+        mpesaReceiptNumber: ResultCode === 0 
+          ? CallbackMetadata.Item.find(i => i.Name === 'MpesaReceiptNumber').Value 
+          : null,
+        $inc: { retryCount: 1 }
+      },
+      { new: true }
+    );
 
     if (!transaction) {
-      console.log("Transaction not found for CheckoutRequestID:", stkCallback.CheckoutRequestID);
-      return res.status(404).send({ message: "Transaction not found" });
+      console.error("Transaction not found for CheckoutRequestID:", CheckoutRequestID);
+      return res.status(404).json({ success: false, message: "Transaction not found" });
     }
 
-    if (stkCallback.ResultCode === 0) {
-      const metadata = stkCallback.CallbackMetadata.Item;
-      const mpesaReceiptNumber = metadata.find(item => item.Name === "MpesaReceiptNumber")?.Value;
-
-      transaction.status = 'success';
-      transaction.mpesaReceiptNumber = mpesaReceiptNumber;
-    } else {
-      transaction.status = 'failed';
-    }
-
-    await transaction.save();
-    console.log(`Transaction ${transaction._id} updated:`, {
-      status: transaction.status,
-      mpesaReceiptNumber: transaction.mpesaReceiptNumber,
-      updatedAt: transaction.updatedAt,
-    });
-
-    res.status(200).send({
-      status: "success",
-      message: "Callback processed successfully",
-    });
+    console.log(`💰 Transaction ${transaction._id} updated to status: ${transaction.status}`);
+    res.status(200).json({ success: true });
   } catch (error) {
-    console.error("🔴 M-Pesa callback error:", error);
-    res.status(500).send({
-      status: "error",
-      message: error.message,
-    });
+    console.error("🔴 Callback processing error:", error);
+    res.status(500).json({ success: false, message: "Callback processing failed" });
   }
 });
 
-// Transaction Status Check Endpoint
-app.get('/transaction-status/:id', async (req, res) => {
+// Transaction Status Check
+app.get('/transactions/:id', async (req, res) => {
   try {
-    const transaction = await Transaction.findById(req.params.id);
+    const transaction = await Transaction.findById(req.params.id)
+      .select('-__v -updatedAt')
+      .lean();
 
     if (!transaction) {
-      return res.status(404).send({
-        status: 'error',
-        message: "Transaction not found",
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found"
       });
     }
 
-    res.status(200).send({
-      status: transaction.status,
-      transactionId: transaction._id,
-      mpesaReceiptNumber: transaction.mpesaReceiptNumber,
-      updatedAt: transaction.updatedAt,
+    res.status(200).json({
+      success: true,
+      data: transaction
     });
   } catch (error) {
-    console.error("🔴 Transaction status error:", error);
-    res.status(500).send({
-      status: 'error',
-      message: "Error fetching transaction status",
-      error: error.message,
+    console.error("🔴 Transaction lookup error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching transaction"
     });
   }
 });
 
-// Global Error Handler
+// Error Handling Middleware
 app.use((err, req, res, next) => {
-  console.error('🚨 Global error handler:', err);
+  console.error("🚨 Global error:", err.stack);
   res.status(500).json({
-    status: 'error',
-    message: 'Internal server error'
+    success: false,
+    message: "Internal server error",
+    error: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
 });
 
 // Start Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  connectToDatabase();
-  console.log(`🚀 Server operational on port ${PORT}`);
+app.listen(PORT, async () => {
+  await connectToDatabase();
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🔗 M-Pesa Callback URL: ${process.env.API_BASE_URL}/mpesa/callback`);
 });

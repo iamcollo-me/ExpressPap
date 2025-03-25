@@ -34,6 +34,11 @@ const Register = () => {
       }
     });
 
+    // Updated License Plate Validation
+  if (formData.licensePlate && !/^[A-Z]{3}\s\d{3}[A-Z]$/.test(formData.licensePlate.toUpperCase())) {
+    newErrors.licensePlate = 'License plate must be in Kenyan format (e.g., "KBB 334A")';
+  }
+
     // Phone number validation (Kenyan format: starts with 07 or 01 and has 10 digits)
     if (formData.contact && !/^(07|01)\d{8}$/.test(formData.contact)) {
       newErrors.contact = 'Phone number must start with "07" or "01" and contain 10 digits.';

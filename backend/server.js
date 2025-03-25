@@ -43,10 +43,10 @@ const vehicleSchema = new mongoose.Schema({
     trim: true,
     validate: {
       validator: function(v) {
-        // Allow formats like "KBB 334A" or "KAT 197D"
+        // Strict validation for NEW Kenyan plates only (e.g., "KBB 334A")
         return /^[A-Z]{3}\s\d{3}[A-Z]$/.test(v);
       },
-      message: props => `${props.value} is not a valid license plate!`
+      message: props => `${props.value} is not a valid NEW Kenyan license plate (Expected format: e.g., KBB 334A)`
     }
   },
   ownerName: String,
@@ -58,6 +58,17 @@ const vehicleSchema = new mongoose.Schema({
     default: Date.now,
   },
   contact: String,
+});
+vehicleSchema.pre('save', function(next) {
+  // Remove all spaces and convert to uppercase
+  const plate = this.licensePlate.replace(/\s/g, '').toUpperCase();
+  
+  // Reformat to "KBB 334A" pattern if valid
+  if (/^[A-Z]{3}\d{3}[A-Z]$/.test(plate)) {
+    this.licensePlate = `${plate.substring(0, 3)} ${plate.substring(3, 6)}${plate.substring(6)}`;
+  }
+  
+  next();
 });
 
 const Vehicle = mongoose.model('Vehicle', vehicleSchema);

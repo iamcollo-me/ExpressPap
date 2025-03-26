@@ -12,10 +12,11 @@ const Verify = () => {
   const [pollCount, setPollCount] = useState(0);
 
   // Access environment variables
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL; // Node.js backend
-  const LPR_API_URL = import.meta.env.VITE_LPR_API_URL;   // Python backend
+  const API_BASE_URL = 'http://localhost:5000'; // Node.js backend
+  const LPR_API_URL = 'http://localhost:5001';   // Python backend
 
-
+  console.log('API_BASE_URL:', API_BASE_URL);
+  console.log('LPR_API_URL:', LPR_API_URL);
 
   // Poll transaction status
   useEffect(() => {

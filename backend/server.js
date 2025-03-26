@@ -310,6 +310,24 @@ app.get('/transaction-status/:id', async (req, res) => {
   }
 });
 
+app.get('/check-payment/:transactionId', async (req, res) => {
+  try {
+    const transaction = await Transaction.findById(req.params.transactionId);
+   
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+   
+    res.json({
+      status: transaction.status,
+      licensePlate: transaction.licensePlate,
+      updatedAt: transaction.updatedAt
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Global Error Handler
 app.use((err, req, res, next) => {
   console.error('🚨 Global error handler:', err);

@@ -12,8 +12,8 @@ const Verify = () => {
   const [pollCount, setPollCount] = useState(0);
 
   // Access environment variables
-  const API_BASE_URL = 'http://localhost:5000'; // Node.js backend
-  const LPR_API_URL = 'http://localhost:5001';   // Python backend
+  const API_BASE_URL = 'https://expresspap.onrender.com'; // Node.js backend
+  const LPR_API_URL = 'https://2f24-102-215-33-50.ngrok-free.app';   // Python backend
 
   console.log('API_BASE_URL:', API_BASE_URL);
   console.log('LPR_API_URL:', LPR_API_URL);

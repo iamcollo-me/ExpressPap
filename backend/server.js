@@ -43,10 +43,11 @@ const vehicleSchema = new mongoose.Schema({
     trim: true,
     validate: {
       validator: function(v) {
-        // Strict validation for NEW Kenyan plates only (e.g., "KBB 334A")
-        return /^[A-Z]{3}\s\d{3}[A-Z]$/.test(v);
+        // Now accepts both KBB 334A and KAT 1970 formats
+        return /^[A-Z]{3}\s\d{3}[A-Z]$/.test(v) ||  // KBB 334A
+               /^[A-Z]{3}\s\d{4}$/.test(v);        // KAT 1970
       },
-      message: props => `${props.value} is not a valid NEW Kenyan license plate (Expected format: e.g., KBB 334A)`
+      message: props => `${props.value} must be like KBB 334A or KAT 1970`
     }
   },
   ownerName: String,
@@ -59,13 +60,17 @@ const vehicleSchema = new mongoose.Schema({
   },
   contact: String,
 });
+
 vehicleSchema.pre('save', function(next) {
-  // Remove all spaces and convert to uppercase
   const plate = this.licensePlate.replace(/\s/g, '').toUpperCase();
   
-  // Reformat to "KBB 334A" pattern if valid
+  // Format KAT1970 -> KAT 197D if has letter suffix
   if (/^[A-Z]{3}\d{3}[A-Z]$/.test(plate)) {
-    this.licensePlate = `${plate.substring(0, 3)} ${plate.substring(3, 6)}${plate.substring(6)}`;
+    this.licensePlate = `${plate.slice(0,3)} ${plate.slice(3,6)}${plate.slice(6)}`;
+  } 
+  // Format KAT1970 -> KAT 1970 if all numbers
+  else if (/^[A-Z]{3}\d{4}$/.test(plate)) {
+    this.licensePlate = `${plate.slice(0,3)} ${plate.slice(3)}`;
   }
   
   next();
@@ -183,9 +188,6 @@ async function initiateMpesaPayment(phone, amount = 1) {
   }
 }
 
-
-
-
 // Schedule token refresh
 setInterval(async () => {
   if (!mpesaAccessToken || Date.now() >= tokenExpiryTime) {
@@ -210,9 +212,9 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Verify and Payment Endpoint
-
+// Verify and Payment Endpoint (FIXED - single implementation)
 app.post('/verify', async (req, res) => {
+  console.log('🔔 Received plate:', req.body.licensePlate);
   try {
     // 1. Validate and clean input
     if (!req.body.licensePlate || typeof req.body.licensePlate !== 'string') {

@@ -8,6 +8,7 @@ import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+import re
 
 # Load environment variables
 load_dotenv()
@@ -45,16 +46,67 @@ def process_file(file):
         print(f"📁 File error: {str(e)}")
         raise
 
-def ocr_processing(img):
-    # Simple image processing
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    results = reader.readtext(gray)
-    return [text[1].upper().replace(' ', '') for text in results]
+def format_plate(raw_plate):
+    """Convert raw OCR to Kenyan standard format"""
+    clean = re.sub(r'[^A-Z0-9]', '', raw_plate.upper())
+    if len(clean) == 7:  # Like KAT1970
+        return f"{clean[:3]} {clean[3:6]}{clean[6]}"  # -> KAT 197D
+    elif len(clean) == 6:  # Like KBB123
+        return f"{clean[:3]} {clean[3:]}"  # -> KBB 123
+    return raw_plate  # Fallback for custom plates
 
+def ocr_processing(img):
+    """Enhanced OCR with Kenyan plate focus"""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    results = reader.readtext(gray, 
+                           allowlist='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                           detail=0)
+    return [format_plate(text) for text in results]
+
+# Update the upload endpoint:
 @app.route("/upload", methods=["POST"])
 def upload_image():
     print("\n📨 New request received")
     
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "No image file"}), 400
+            
+        img = process_file(request.files['image'])
+        print("🔍 Processing image...")
+        plates = ocr_processing(img)
+        print(f"🔑 Detected: {plates}")
+
+        if not plates:
+            return jsonify({"error": "No plate detected"}), 400
+
+        # Enhanced backend request
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        
+        print(f"📤 Sending to {NODEJS_BACKEND_URL}...")
+        response = requests.post(
+            f"{NODEJS_BACKEND_URL}/verify",
+            json={"licensePlate": plates[0]},
+            headers=headers,
+            timeout=25  # Increased timeout
+        )
+        
+        print(f"🔧 Backend response: {response.status_code}")
+        return jsonify(response.json()), response.status_code
+
+    except requests.exceptions.Timeout:
+        print("⌛ Backend timeout - try again later")
+        return jsonify({"error": "Backend timeout"}), 503
+    except requests.exceptions.RequestException as e:
+        print(f"🔴 Connection failed: {str(e)}")
+        return jsonify({"error": "Backend unavailable"}), 503
+    except Exception as e:
+        print(f"🔥 Processing error: {str(e)}")
+        return jsonify({"error": "OCR failed"}), 500
+
     try:
         # Handle both JSON and file uploads
         if request.is_json:
@@ -73,6 +125,19 @@ def upload_image():
 
         if not plates:
             return jsonify({"status": "error", "message": "No plate found"}), 400
+        
+        headers = {
+            "Content-Type": "application/json",
+            "X-OCR-Request": "true"
+        }
+        
+        response = requests.post(
+            f"{NODEJS_BACKEND_URL}/verify",
+            json={"licensePlate": plates[0]},
+            headers=headers,
+            timeout=25  # Increased timeout
+        )
+
 
         print(f"📤 Sending to {NODEJS_BACKEND_URL}...")
         response = requests.post(

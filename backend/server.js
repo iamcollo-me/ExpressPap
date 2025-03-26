@@ -40,15 +40,7 @@ const vehicleSchema = new mongoose.Schema({
     required: true,
     unique: true,
     uppercase: true,
-    trim: true,
-    validate: {
-      validator: function(v) {
-        // Now accepts both KBB 334A and KAT 1970 formats
-        return /^[A-Z]{3}\s\d{3}[A-Z]$/.test(v) ||  // KBB 334A
-               /^[A-Z]{3}\s\d{4}$/.test(v);        // KAT 1970
-      },
-      message: props => `${props.value} must be like KBB 334A or KAT 1970`
-    }
+    trim: true
   },
   ownerName: String,
   carType: String,
@@ -59,21 +51,6 @@ const vehicleSchema = new mongoose.Schema({
     default: Date.now,
   },
   contact: String,
-});
-
-vehicleSchema.pre('save', function(next) {
-  const plate = this.licensePlate.replace(/\s/g, '').toUpperCase();
-  
-  // Format KAT1970 -> KAT 197D if has letter suffix
-  if (/^[A-Z]{3}\d{3}[A-Z]$/.test(plate)) {
-    this.licensePlate = `${plate.slice(0,3)} ${plate.slice(3,6)}${plate.slice(6)}`;
-  } 
-  // Format KAT1970 -> KAT 1970 if all numbers
-  else if (/^[A-Z]{3}\d{4}$/.test(plate)) {
-    this.licensePlate = `${plate.slice(0,3)} ${plate.slice(3)}`;
-  }
-  
-  next();
 });
 
 const Vehicle = mongoose.model('Vehicle', vehicleSchema);
@@ -214,22 +191,16 @@ app.post('/register', async (req, res) => {
 
 // Verify and Payment Endpoint (FIXED - single implementation)
 app.post('/verify', async (req, res) => {
-  console.log('🔔 Received plate:', req.body.licensePlate);
   try {
     // 1. Validate and clean input
     if (!req.body.licensePlate || typeof req.body.licensePlate !== 'string') {
       return res.status(400).json({ error: "Valid license plate required" });
     }
 
-    // 2. Standardize format (uppercase, allow spaces)
+    // 2. Simply convert to uppercase and trim
     const licensePlate = req.body.licensePlate.toUpperCase().trim();
 
-    // 3. Simple validation
-    if (!/^[A-Z]{3}\s\d{3}[A-Z]$/.test(licensePlate)) {
-      return res.status(400).json({ error: "Invalid license plate format" });
-    }
-
-    // 4. Direct database query
+    // 3. Direct database query
     const vehicle = await Vehicle.findOne({ licensePlate }).lean();
 
     if (!vehicle) {

@@ -47,13 +47,8 @@ def process_file(file):
         raise
 
 def format_plate(raw_plate):
-    """Convert raw OCR to Kenyan standard format"""
-    clean = re.sub(r'[^A-Z0-9]', '', raw_plate.upper())
-    if len(clean) == 7:  # Like KAT1970
-        return f"{clean[:3]} {clean[3:6]}{clean[6]}"  # -> KAT 197D
-    elif len(clean) == 6:  # Like KBB123
-        return f"{clean[:3]} {clean[3:]}"  # -> KBB 123
-    return raw_plate  # Fallback for custom plates
+    """Simply convert to uppercase and remove special characters"""
+    return re.sub(r'[^A-Z0-9]', '', raw_plate.upper())
 
 def ocr_processing(img):
     """Enhanced OCR with Kenyan plate focus"""

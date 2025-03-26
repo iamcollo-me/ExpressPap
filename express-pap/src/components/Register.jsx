@@ -100,7 +100,7 @@ const Register = () => {
           <input
             type="text"
             name="licensePlate"
-            placeholder="e.g., ABC123"
+            placeholder="e.g., KAT 197D"
             value={formData.licensePlate}
             onChange={handleChange}
             className={`w-full px-3 py-2 border rounded bg-transparent text-white placeholder-light-200 ${

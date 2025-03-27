@@ -17,7 +17,9 @@ const Verify = () => {
 
   // API URLs
   const API_BASE_URL = 'https://expresspap.onrender.com';
-  const LPR_API_URL = 'https://2697-102-0-18-196.ngrok-free.app';
+  const LPR_API_URL = 'https://190a-102-0-18-196.ngrok-free.app';
+
+  conssole.log(LPR_API_URL);
 
   // Drag and drop handlers
   const handleDragEnter = (e) => {

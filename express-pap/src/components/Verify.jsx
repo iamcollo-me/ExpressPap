@@ -17,7 +17,7 @@ const Verify = () => {
 
   // API URLs
   const API_BASE_URL = 'https://expresspap.onrender.com';
-  const LPR_API_URL = 'https://190a-102-0-18-196.ngrok-free.app';
+  const LPR_API_URL = 'https://6e6b-105-160-73-172.ngrok-free.app';
 
   console.log("LPR_API_URL:", LPR_API_URL);
 

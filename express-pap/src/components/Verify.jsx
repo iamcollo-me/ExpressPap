@@ -17,7 +17,7 @@ const Verify = () => {
 
   // API URLs
   const API_BASE_URL = 'https://expresspap.onrender.com';
-  const LPR_API_URL = 'https://6e6b-105-160-73-172.ngrok-free.app';
+  const LPR_API_URL = 'https://2aac-105-160-73-172.ngrok-free.app';
 
   console.log("LPR_API_URL:", LPR_API_URL);
 
@@ -180,7 +180,7 @@ const Verify = () => {
         console.log("Python backend response:", lprData);
 
         if (!lprData.licensePlate) {
-          throw new Error("Failed to extract license plate from image.");
+          throw new Error("liscence plate extracted from image await message.");
         }
 
         extractedLicensePlate = lprData.licensePlate.toUpperCase().trim();

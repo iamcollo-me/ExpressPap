@@ -9,6 +9,12 @@ dotenv.config();
 
 const app = express();
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
 // Middleware Configuration
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -18,17 +24,28 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// MongoDB Connection
+// MongoDB Connection with enhanced monitoring
 const connectToDatabase = async () => {
   try {
+    console.log('[MongoDB] Connecting to database...');
     await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 10000,  // Increased timeout
       socketTimeoutMS: 45000,
-      family: 4 // Force IPv4
+      family: 4
     });
-    console.log("✅ MongoDB connection established");
+    console.log('✅ [MongoDB] Connection established');
+
+    mongoose.connection.on('connected', () => {
+      console.log('[MongoDB] Connection active');
+    });
+    mongoose.connection.on('disconnected', () => {
+      console.warn('⚠️ [MongoDB] Connection lost');
+    });
+    mongoose.connection.on('error', (err) => {
+      console.error('🔴 [MongoDB] Connection error:', err);
+    });
   } catch (error) {
-    console.error("🔴 Critical MongoDB connection failure:", error);
+    console.error("🔴 [MongoDB] Critical connection failure:", error);
     process.exit(1);
   }
 };
@@ -93,6 +110,7 @@ let tokenExpiryTime = null;
 
 async function getMpesaAccessToken() {
   try {
+    console.log('[MPesa] Refreshing access token...');
     const consumerKey = process.env.MPESA_CONSUMER_KEY;
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
     const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
@@ -103,9 +121,10 @@ async function getMpesaAccessToken() {
 
     mpesaAccessToken = response.data.access_token;
     tokenExpiryTime = Date.now() + 55 * 60 * 1000;
-    console.log("🔑 M-Pesa access token refreshed");
+    console.log("🔑 [MPesa] Access token refreshed");
+    console.debug(`[MPesa] Token expires at: ${new Date(tokenExpiryTime).toISOString()}`);
   } catch (error) {
-    console.error("🔴 Error fetching access token:", error.message);
+    console.error("🔴 [MPesa] Error fetching access token:", error.message);
     throw error;
   }
 }
@@ -113,29 +132,27 @@ async function getMpesaAccessToken() {
 // M-Pesa Payment Initiation
 async function initiateMpesaPayment(phone, amount = 1) {
   try {
+    console.log(`[MPesa] Initiating payment for ${phone}`);
     const timestamp = new Date().toISOString().slice(0, 19).replace(/[-T:]/g, '');
     const password = Buffer.from(`${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`).toString('base64');
 
-    // Convert phone number to 254 format
     const phoneString = phone.toString().trim();
     let formattedPhone;
 
     if (phoneString.startsWith("0")) {
-      formattedPhone = `254${phoneString.slice(1)}`; // Convert 07... to 2547...
+      formattedPhone = `254${phoneString.slice(1)}`;
     } else if (phoneString.startsWith("+254")) {
-      formattedPhone = phoneString.slice(1); // Remove the + from +254...
+      formattedPhone = phoneString.slice(1);
     } else if (phoneString.startsWith("254")) {
-      formattedPhone = phoneString; // Already in 254 format
+      formattedPhone = phoneString;
     } else if (phoneString.match(/^\d{9}$/)) {
-      // Handle numbers like 790802553 (missing leading 0)
-      formattedPhone = `254${phoneString}`; // Assume it's a local number missing the 0
+      formattedPhone = `254${phoneString}`;
     } else {
-      throw new Error(`Invalid phone number format: ${phoneString}. Must start with 0, +254, or 254, or be 9 digits.`);
+      throw new Error(`Invalid phone number format: ${phoneString}`);
     }
 
-    // Validate the formatted phone number
     if (formattedPhone.length !== 12 || !formattedPhone.match(/^254\d{9}$/)) {
-      throw new Error(`Invalid phone number: ${formattedPhone}. Must be 12 digits starting with 254.`);
+      throw new Error(`Invalid phone number: ${formattedPhone}`);
     }
 
     const response = await axios.post(
@@ -158,9 +175,17 @@ async function initiateMpesaPayment(phone, amount = 1) {
       }
     );
 
+    console.log('[MPesa] Payment initiated:', {
+      checkoutRequestID: response.data.CheckoutRequestID,
+      merchantRequestID: response.data.MerchantRequestID
+    });
     return response.data;
   } catch (error) {
-    console.error("🔴 M-Pesa payment initiation error:", error.response?.data || error.message);
+    console.error("🔴 [MPesa] Payment initiation error:", {
+      message: error.message,
+      response: error.response?.data,
+      phone: phone
+    });
     throw error;
   }
 }
@@ -176,15 +201,21 @@ setInterval(async () => {
 getMpesaAccessToken();
 
 // Routes
-app.get('/', (req, res) => res.send("API is running..."));
+app.get('/', (req, res) => {
+  console.log('[Server] Health check received');
+  res.send("API is running...");
+});
 
 // Vehicle Registration Endpoint
 app.post('/register', async (req, res) => {
   try {
+    console.log('[Register] New vehicle:', req.body.licensePlate);
     const vehicle = new Vehicle(req.body);
     await vehicle.save();
+    console.log('[Register] Vehicle saved:', vehicle._id);
     res.status(201).send({ message: "✔️ Successful Registration" });
   } catch (error) {
+    console.error('[Register] Error:', error);
     res.status(500).send({ message: "❌ Error registering vehicle!", error });
   }
 });
@@ -192,25 +223,27 @@ app.post('/register', async (req, res) => {
 // Verify and Payment Endpoint
 app.post('/verify', async (req, res) => {
   try {
-    // 1. Validate and clean input
+    console.log('[Verify] Request received:', {
+      licensePlate: req.body.licensePlate,
+      ip: req.ip
+    });
+
     if (!req.body.licensePlate || typeof req.body.licensePlate !== 'string') {
+      console.warn('[Verify] Invalid license plate format');
       return res.status(400).json({ error: "Valid license plate required" });
     }
 
-    // 2. Simply convert to uppercase and trim
     const licensePlate = req.body.licensePlate.toUpperCase().trim();
-
-    // 3. Direct database query
     const vehicle = await Vehicle.findOne({ licensePlate }).lean();
 
     if (!vehicle) {
+      console.warn('[Verify] Vehicle not found:', licensePlate);
       return res.status(404).json({ 
         registered: false,
         searchedPlate: licensePlate 
       });
     }
 
-    // 5. Proceed with payment
     const paymentResponse = await initiateMpesaPayment(vehicle.contact);
     const transaction = await Transaction.create({
       licensePlate: vehicle.licensePlate,
@@ -221,6 +254,13 @@ app.post('/verify', async (req, res) => {
       merchantRequestID: paymentResponse.MerchantRequestID,
     });
 
+    console.log('[Verify] Transaction created:', {
+      id: transaction._id,
+      licensePlate: transaction.licensePlate,
+      status: transaction.status,
+      checkoutID: transaction.checkoutRequestID
+    });
+
     return res.json({
       registered: true,
       vehicle,
@@ -228,7 +268,11 @@ app.post('/verify', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Verify error:', error);
+    console.error('[Verify] Error:', {
+      error: error.message,
+      stack: error.stack,
+      body: req.body
+    });
     return res.status(500).json({ 
       error: "Processing error",
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -239,8 +283,11 @@ app.post('/verify', async (req, res) => {
 // M-Pesa Callback Endpoint
 app.post('/mpesa/callback', async (req, res) => {
   try {
+    console.log('[Callback] Received:', JSON.stringify(req.body, null, 2));
+    
     const { Body } = req.body;
     const { stkCallback } = Body;
+    console.log('[Callback] Processing:', stkCallback.CheckoutRequestID);
 
     const transaction = await Transaction.findOne({
       checkoutRequestID: stkCallback.CheckoutRequestID,
@@ -248,7 +295,7 @@ app.post('/mpesa/callback', async (req, res) => {
     }).sort({ createdAt: -1 });
 
     if (!transaction) {
-      console.log("Transaction not found for CheckoutRequestID:", stkCallback.CheckoutRequestID);
+      console.error('[Callback] Transaction not found:', stkCallback.CheckoutRequestID);
       return res.status(404).send({ message: "Transaction not found" });
     }
 
@@ -258,15 +305,24 @@ app.post('/mpesa/callback', async (req, res) => {
 
       transaction.status = 'success';
       transaction.mpesaReceiptNumber = mpesaReceiptNumber;
+      console.log('[Callback] Payment successful:', {
+        transactionId: transaction._id,
+        receipt: mpesaReceiptNumber
+      });
     } else {
       transaction.status = 'failed';
+      console.warn('[Callback] Payment failed:', {
+        transactionId: transaction._id,
+        errorCode: stkCallback.ResultCode,
+        errorDesc: stkCallback.ResultDesc
+      });
     }
 
-    await transaction.save();
-    console.log(`Transaction ${transaction._id} updated:`, {
-      status: transaction.status,
-      mpesaReceiptNumber: transaction.mpesaReceiptNumber,
-      updatedAt: transaction.updatedAt,
+    const savedTx = await transaction.save();
+    console.log('[Callback] Transaction updated:', {
+      id: savedTx._id,
+      status: savedTx.status,
+      updatedAt: savedTx.updatedAt
     });
 
     res.status(200).send({
@@ -274,7 +330,11 @@ app.post('/mpesa/callback', async (req, res) => {
       message: "Callback processed successfully",
     });
   } catch (error) {
-    console.error("🔴 M-Pesa callback error:", error);
+    console.error("🔴 [Callback] Error:", {
+      message: error.message,
+      stack: error.stack,
+      body: req.body
+    });
     res.status(500).send({
       status: "error",
       message: error.message,
@@ -285,15 +345,21 @@ app.post('/mpesa/callback', async (req, res) => {
 // Transaction Status Check Endpoint
 app.get('/transaction-status/:id', async (req, res) => {
   try {
+    console.log('[Status] Checking transaction:', req.params.id);
     const transaction = await Transaction.findById(req.params.id);
 
     if (!transaction) {
+      console.warn('[Status] Transaction not found:', req.params.id);
       return res.status(404).send({
         status: 'error',
         message: "Transaction not found",
       });
     }
 
+    console.log('[Status] Returning status:', {
+      id: transaction._id,
+      status: transaction.status
+    });
     res.status(200).send({
       status: transaction.status,
       transactionId: transaction._id,
@@ -301,7 +367,7 @@ app.get('/transaction-status/:id', async (req, res) => {
       updatedAt: transaction.updatedAt,
     });
   } catch (error) {
-    console.error("🔴 Transaction status error:", error);
+    console.error("[Status] Error:", error);
     res.status(500).send({
       status: 'error',
       message: "Error fetching transaction status",
@@ -313,54 +379,92 @@ app.get('/transaction-status/:id', async (req, res) => {
 // Check Payment Status Endpoint
 app.get('/check-payment/:transactionId', async (req, res) => {
   try {
+    console.log('[CheckPayment] Request for:', req.params.transactionId);
     const transaction = await Transaction.findById(req.params.transactionId);
    
     if (!transaction) {
+      console.warn('[CheckPayment] Not found:', req.params.transactionId);
       return res.status(404).json({ error: "Transaction not found" });
     }
    
+    console.log('[CheckPayment] Returning:', {
+      id: transaction._id,
+      status: transaction.status
+    });
     res.json({
       status: transaction.status,
       licensePlate: transaction.licensePlate,
       updatedAt: transaction.updatedAt
     });
   } catch (error) {
+    console.error('[CheckPayment] Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ESP8266 Gate Status Endpoint (Simple allow/deny response)
+// ESP8266 Gate Status Endpoint
 app.get('/gate-status', async (req, res) => {
   try {
-    // Get the most recent transaction
+    console.log('[GateStatus] Checking latest transaction');
     const transaction = await Transaction.findOne()
-      .sort({ updatedAt: -1 }) // Most recent first
+      .sort({ updatedAt: -1 })
       .limit(1);
     
     if (!transaction) {
-      return res.status(200).send("deny"); // No transactions exist
+      console.log('[GateStatus] No transactions found');
+      return res.status(200).send("deny");
     }
     
-    // Only allow if payment was successful
     if (transaction.status === "success") {
-      // Optional: Add expiration check (e.g., payment valid for 5 minutes)
       const paymentAge = (new Date() - transaction.updatedAt) / (1000 * 60);
-      if (paymentAge <= 5) { // 5 minute window
+      if (paymentAge <= 5) {
+        console.log('[GateStatus] Allowing access for:', transaction._id);
         return res.send("allow");
       }
+      console.log('[GateStatus] Payment expired:', paymentAge.toFixed(2), 'minutes old');
     }
     
-    // Default deny for failed/pending/expired payments
+    console.log('[GateStatus] Denying access. Status:', transaction.status);
     res.send("deny");
   } catch (error) {
-    console.error("Gate status error:", error);
-    res.status(500).send("deny"); // Fail secure
+    console.error("[GateStatus] Error:", error);
+    res.status(500).send("deny");
+  }
+});
+
+// Debug Endpoint
+app.get('/debug/transactions', async (req, res) => {
+  try {
+    const count = await Transaction.countDocuments();
+    const recent = await Transaction.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean();
+    
+    console.log('[Debug] Transaction summary:', { count });
+    res.json({
+      count,
+      recent,
+      dbStatus: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      mpesaToken: mpesaAccessToken ? 'valid' : 'invalid'
+    });
+  } catch (error) {
+    console.error('[Debug] Error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // Global Error Handler
 app.use((err, req, res, next) => {
-  console.error('🚨 Global error handler:', err);
+  const errorLog = {
+    timestamp: new Date().toISOString(),
+    path: req.path,
+    method: req.method,
+    error: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+    body: req.body
+  };
+  console.error('🚨 [Global] Unhandled error:', errorLog);
   res.status(500).json({
     status: 'error',
     message: 'Internal server error'
@@ -370,6 +474,9 @@ app.use((err, req, res, next) => {
 // Start Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
+  console.log(`[Server] Starting on port ${PORT}`);
+  console.log(`[Server] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[Server] MPesa Callback URL: ${process.env.MPESA_CALLBACK_URL}`);
   connectToDatabase();
-  console.log(`🚀 Server operational on port ${PORT}`);
+  console.log(`🚀 [Server] Operational on port ${PORT}`);
 });

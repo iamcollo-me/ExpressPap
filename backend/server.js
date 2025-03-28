@@ -189,7 +189,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Verify and Payment Endpoint (FIXED - single implementation)
+// Verify and Payment Endpoint
 app.post('/verify', async (req, res) => {
   try {
     // 1. Validate and clean input
@@ -310,6 +310,7 @@ app.get('/transaction-status/:id', async (req, res) => {
   }
 });
 
+// Check Payment Status Endpoint
 app.get('/check-payment/:transactionId', async (req, res) => {
   try {
     const transaction = await Transaction.findById(req.params.transactionId);
@@ -325,6 +326,35 @@ app.get('/check-payment/:transactionId', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ESP8266 Gate Status Endpoint (Simple allow/deny response)
+app.get('/gate-status', async (req, res) => {
+  try {
+    // Get the most recent transaction
+    const transaction = await Transaction.findOne()
+      .sort({ updatedAt: -1 }) // Most recent first
+      .limit(1);
+    
+    if (!transaction) {
+      return res.status(200).send("deny"); // No transactions exist
+    }
+    
+    // Only allow if payment was successful
+    if (transaction.status === "success") {
+      // Optional: Add expiration check (e.g., payment valid for 5 minutes)
+      const paymentAge = (new Date() - transaction.updatedAt) / (1000 * 60);
+      if (paymentAge <= 5) { // 5 minute window
+        return res.send("allow");
+      }
+    }
+    
+    // Default deny for failed/pending/expired payments
+    res.send("deny");
+  } catch (error) {
+    console.error("Gate status error:", error);
+    res.status(500).send("deny"); // Fail secure
   }
 });
 

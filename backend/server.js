@@ -405,29 +405,64 @@ app.get('/check-payment/:transactionId', async (req, res) => {
 // ESP8266 Gate Status Endpoint
 app.get('/gate-status', async (req, res) => {
   try {
-    console.log('[GateStatus] Checking latest transaction');
-    const transaction = await Transaction.findOne()
-      .sort({ updatedAt: -1 })
-      .limit(1);
-    
+    // Log incoming request details for debugging
+    console.log('[GateStatus] New request received', {
+      timestamp: new Date().toISOString(),
+      ip: req.ip,
+      headers: req.headers,
+      query: req.query
+    });
+
+    // Find the most recent successful transaction
+    const transaction = await Transaction.findOne({
+      status: "success",
+      gateOpened: { $ne: true } // Only find transactions that haven't opened the gate yet
+    })
+    .sort({ updatedAt: -1 })
+    .limit(1)
+    .lean();
+
     if (!transaction) {
-      console.log('[GateStatus] No transactions found');
+      console.log('[GateStatus] No unprocessed successful transactions found');
       return res.status(200).send("deny");
     }
-    
-    if (transaction.status === "success") {
-      const paymentAge = (new Date() - transaction.updatedAt) / (1000 * 60);
-      if (paymentAge <= 5) {
-        console.log('[GateStatus] Allowing access for:', transaction._id);
-        return res.send("allow");
-      }
-      console.log('[GateStatus] Payment expired:', paymentAge.toFixed(2), 'minutes old');
+
+    // Calculate payment age in minutes
+    const paymentAge = (new Date() - new Date(transaction.updatedAt)) / (1000 * 60);
+    console.log('[GateStatus] Transaction details:', {
+      transactionId: transaction._id,
+      licensePlate: transaction.licensePlate,
+      paymentAgeMinutes: paymentAge.toFixed(2),
+      receipt: transaction.mpesaReceiptNumber
+    });
+
+    // Check if payment is still valid (within 5 minutes)
+    if (paymentAge <= 5) {
+      console.log('[GateStatus] Allowing access for transaction:', transaction._id);
+      
+      // Mark transaction as used (optional)
+      await Transaction.updateOne(
+        { _id: transaction._id },
+        { $set: { gateOpened: true, gateOpenedAt: new Date() } }
+      );
+      
+      return res.status(200).send("allow");
     }
+
+    console.log('[GateStatus] Payment expired:', {
+      transactionId: transaction._id,
+      ageMinutes: paymentAge.toFixed(2)
+    });
     
-    console.log('[GateStatus] Denying access. Status:', transaction.status);
-    res.send("deny");
+    res.status(200).send("deny");
   } catch (error) {
-    console.error("[GateStatus] Error:", error);
+    console.error("[GateStatus] Critical error:", {
+      error: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Send deny response even in case of errors to keep gate secure
     res.status(500).send("deny");
   }
 });

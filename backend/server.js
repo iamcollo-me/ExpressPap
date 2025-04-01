@@ -446,7 +446,7 @@ app.get('/gate-status', async (req, res) => {
         { $set: { gateOpened: true, gateOpenedAt: new Date() } }
       );
       
-      return res.status(200).send("allow");
+      return res.status(200).send(`allow:${transaction._id}`);
     }
 
     console.log('[GateStatus] Payment expired:', {

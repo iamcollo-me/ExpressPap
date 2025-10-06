@@ -235,7 +235,7 @@ Here’s how to use the system:
 
 
 ## **📜 License**
-This project is part of a final-year group project and is not currently licensed for public use.
+This project is part of a finalising student's group project and is not currently licensed for public use.
 
 ---
 

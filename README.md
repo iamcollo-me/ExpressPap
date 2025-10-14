@@ -119,7 +119,7 @@ EXPRESSPAP/
 ### **💽Installation**
 1. Clone this repository:
    ```bash
-   git clone https://github.com/Crimson007/ExpressPap.git
+   git clone https://github.com/iamcollo-me/ExpressPap.git
    ```
 2. Navigate to the project directory:
    ```bash

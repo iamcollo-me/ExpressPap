@@ -24,7 +24,7 @@
 
 
 ## **🌍 Project Overview**
-Express Pap! is an IoT-Based Toll System designed to address congestion and delays on busy toll roads. By leveraging the ESP32-CAM to capture vehicle registration plates and integrating M-Pesa for instant toll payments via STK Push, this project ensures fast, efficient, and user-friendly toll collection. 
+ngestion and delays on busy toll roads. By leveraging the ESP32-CAM to capture vehicle registration plates and integrating M-Pesa for instant toll payments via STK Push, this project ensures fast, efficient, and user-friendly toll collection. 
 
 ### **Target Audience**
 - 🎯 Target Audience
